@@ -1,0 +1,10 @@
+
+CREATE TABLE accelerometers (
+    well_id		int,
+    well_time	timestamp,
+    y			double precision[]
+);
+
+select well_id from accelerometers where average(y) < -0.5 and datediff('h', current_timestamp, well_time) = 12
+
+I don't have a postgres instance here but I assume an average of an array would return the average of the values in the array.  I can't find a clear answer in the docs saying so but maybe too obvious. Mysql doesn't have an array type.
