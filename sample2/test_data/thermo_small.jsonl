@@ -1,0 +1,15 @@
+{"updateTime": "2016-01-01T00:43:00.001064", "update": {"ambientTemp": 80}}
+{"updateTime": "2016-01-01T01:38:00.001038", "update": {"ambientTemp": 82}}
+{"updateTime": "2016-01-01T03:18:30.001950", "update": {"schedule": true}}
+{"updateTime": "2016-01-02T01:32:00.002066", "update": {"schedule": false}}
+{"updateTime": "2016-01-02T02:35:00.001013", "update": {"ambientTemp": 82}}
+{"updateTime": "2016-01-02T04:35:00.001204", "update": {"ambientTemp": 73}}
+{"updateTime": "2016-01-03T00:32:30.001083", "update": {"heatTemp": 68}}
+{"updateTime": "2016-01-03T00:46:30.005581", "update": {"ambientTemp": 69}}
+{"updateTime": "2016-01-03T03:14:00.020107", "update": {"ambientTemp": 63}}
+{"updateTime": "2016-01-04T01:29:30.001738", "update": {"ambientTemp": 71}}
+{"updateTime": "2016-01-04T02:35:00.068493", "update": {"ambientTemp": 75}}
+{"updateTime": "2016-01-04T08:54:30.002086", "update": {"ambientTemp": 77}}
+{"updateTime": "2016-01-06T00:12:30.001252", "update": {"ambientTemp": 68}}
+{"updateTime": "2016-01-06T01:13:00.001923", "update": {"coolTemp": 69}}
+{"updateTime": "2016-01-06T04:09:00.001258", "update": {"ambientTemp": 69}}
