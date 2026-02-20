@@ -3,6 +3,8 @@ import re
 from sqlite3 import Connection
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import argparse
+
 
 def eastern_time(str_date):
 
@@ -246,8 +248,8 @@ def show_restock(con: Connection, table_type):
     print(f"{table_type.upper()} OUT OF STOCK")
     print("---------------------------------")
 
-    sql = (f"select i.item_id, item_name, sum(quantity) from {table_type}_inventory w "
-           f"join items i  on w.item_id = i.item_id where quantity = 0 group by 1,2")
+    sql = (f"select i.item_id, item_name, sum(quantity) as qsum from {table_type}_inventory w "
+           f"join items i  on w.item_id = i.item_id group by 1,2 having qsum = 0")
 
     res = con.cursor().execute(sql)
     rows = res.fetchall()
@@ -261,19 +263,35 @@ def show_restock(con: Connection, table_type):
         print(f"id {item_id} {name}, units: {quantity}")
 
 
-def show_inventory(con: Connection, table_type, list_by_stickers=False):
+def show_inventory(con: Connection, table_type, cmd=""):
+
+    list_by_stickers=False
+    ar = cmd.split(" ")
+    if table_type== "box" and  len(ar) == 2 and ar[1].startswith("sticker"):
+        list_by_stickers = True
+
+    item_to_search_for = ""
+    if len(ar) == 2 and not re.search("[^0-9]", ar[1]):
+        item_to_search_for = ar[1]
+        if not item_exists(con, item_to_search_for):
+            return
 
     print("---------------------------------")
     print(f"{table_type.upper()} INVENTORY")
     print("---------------------------------")
 
-    if table_type == "box" and list_by_stickers:
-        sql = (f"select i.item_id, item_name, sum(quantity), sticker from {table_type}_inventory w "
-               f"join items i on w.item_id = i.item_id where quantity > 0 group by 1,2,3")
+    if table_type == "box" and  list_by_stickers:
+        sql = f"select i.item_id, item_name, sticker, sum(quantity) from {table_type}_inventory w "
 
     else:
-        sql = (f"select i.item_id, item_name, sum(quantity), 0 from {table_type}_inventory w "
-               f"join items i on w.item_id = i.item_id where quantity > 0 group by 1,2")
+        sql = f"select i.item_id, item_name, 0 as sticker, sum(quantity) from {table_type}_inventory w "
+
+
+    sql +=  f"join items i on w.item_id = i.item_id where quantity > 0 "
+    if item_to_search_for:
+        sql +=  f" and i.item_id = {item_to_search_for} "
+
+    sql += " group by 1,2,3"
 
     res = con.cursor().execute(sql)
     rows = res.fetchall()
@@ -283,10 +301,10 @@ def show_inventory(con: Connection, table_type, list_by_stickers=False):
         return
 
     for row in rows :
-        item_id, name, quantity, sticker = row
+        item_id, name, sticker, quantity  = row
         line = f"id {item_id} {name}, units: {quantity}"
         if sticker:
-            line += ", sticker: {sticker}"
+            line += f", sticker: {sticker}"
 
         print(line)
 
@@ -300,15 +318,22 @@ def show_transactions(con: Connection, table_type, cmd):
     if len(ar) == 2:
         limit = ar[1]
 
-    sql = (f"select i.item_id, item_name, quantity_changed, last_updated from {table_type}_transactions w "
-           f"join items i  on w.item_id = i.item_id order by last_updated desc limit {limit}")
+    if table_type == "box":
+        sql = f"select i.item_id, item_name, quantity_changed, sticker, last_updated from {table_type}_transactions w "
+    else:
+        sql =f"select i.item_id, item_name, quantity_changed, 0 as sticker, last_updated from {table_type}_transactions w "
+
+    sql += f"join items i  on w.item_id = i.item_id order by last_updated desc limit {limit}"
 
     res = con.cursor().execute(sql)
 
     n = 0
     for n, row in enumerate(res.fetchall()):
-        item_id, name, quantity, last_updated = row
-        print(f"id {item_id} {name}: {quantity} {eastern_time(last_updated)}")
+        item_id, name, quantity, sticker, last_updated = row
+        sticker_str = ""
+        if sticker != 0:
+            sticker_str = f"sticker: {sticker}"
+        print(f"id {item_id} {name}: {quantity} {sticker_str} {eastern_time(last_updated)}")
 
     print(n+1, "rows")
 
@@ -322,6 +347,25 @@ def execute_sql(con,cmd):
 
     con.commit()
     print("done")
+
+
+def totals(con):
+
+    sql = ("select i.item_id, item_name, sum(quantity_changed) qsum "
+           "from box_transactions b join items i on b.item_id = i.item_id"
+           " where quantity_changed < 0 group by 1,2 having qsum < 0")
+
+    res = con.cursor().execute(sql)
+
+    if not res:
+        print("No items were distributed")
+        return
+
+    print("We distributed:")
+    for row in res.fetchall():
+        _, item_name, quantity = row
+        print(f"{abs(quantity)} {item_name}")
+
 
 def dump_to_text(con):
 
@@ -339,6 +383,105 @@ def dump_to_text(con):
             for row in rows:
                 f.write(f"{'\t'.join([str(v) for v in row])}\n")
 
+
+def restock_by_sticker(con):
+
+    stickers = set()
+    while True:
+        sticker = input("Sticker: ").strip()
+        if re.search("[^0-9]", sticker):
+            print("Numbers only")
+            continue
+
+        if not sticker:
+            break
+
+        stickers.add(int(sticker))
+
+    if not stickers:
+        return
+
+    # now we have the list of stickers we found in the box
+    # lets review that these are the items we found
+    sql = (f"select i.item_id, item_name, sticker from box_inventory b join "
+           f" items i on b.item_id=i.item_id where sticker <> 0 order by sticker, item_name")
+
+    found_stickers =  []
+    removed_stickers = []
+
+    res = con.cursor().execute(sql)
+    for row in res.fetchall():
+        item_id, item_name, box_sticker = row
+        if box_sticker in stickers:
+            stickers.remove(box_sticker)
+            found_stickers.append((item_id, item_name, box_sticker))
+        else:
+            removed_stickers.append((item_id, item_name, box_sticker))
+
+    if stickers:
+        st = ', '.join([str(x) for x in stickers])
+        print(f"These stickers aren't there! {st}")
+        return
+
+    print("So these items are in the box: ")
+    for item_id, name, sticker in found_stickers:
+        print(f"id {item_id} {name}, sticker: {sticker}")
+
+    print("\nAnd these items were removed from the box: ")
+    for item_id, name, sticker in removed_stickers:
+        print(f"id {item_id} {name}, sticker: {sticker}")
+
+    confirm = input("type YES to confirm: ")
+    if confirm != "YES":
+        print("ok, nevermind")
+        return
+
+    for item_id, _, sticker in removed_stickers:
+        box_transaction(con, f"badd i{item_id} s{sticker} q-1")
+
+    print("done")
+
+
+def restock_no_sticker(con):
+
+    res = con.cursor().execute("select i.item_id, item_name, quantity from items i"
+                               " join box_inventory b on b.item_id = i.item_id"
+                               " where needs_sticker=0 and quantity>0")
+
+    items_changed_quantity = []
+    for row in res.fetchall():
+        item_id, name, quantity = row
+        new_quantity = input(f"How many {name} (had {quantity}):").strip()
+
+        if re.search("[^0-9]", new_quantity):
+            print("Numbers only")
+            continue
+
+        if new_quantity == "" or int(new_quantity) == quantity:
+            continue
+        items_changed_quantity.append((item_id, name, quantity, new_quantity))
+
+    if not items_changed_quantity:
+        print("No changes to non-stickered items")
+        return
+
+    else:
+        print("We removed: ")
+        removed = []
+        for item_id, name, quantity, new_quantity in items_changed_quantity:
+            items_removed = quantity - int(new_quantity)
+            print(f"{items_removed} units {name}, now have {new_quantity}")
+            removed.append( (item_id, items_removed))
+
+    confirm = input("Type YES to confirm: ")
+    if confirm != "YES":
+        print("ok, nevermind")
+        return
+
+    for item_id, items_removed in removed:
+        event_handler(con, f"badd i{item_id} q-{items_removed} s0")
+
+
 def event_handler(con, cmd):
 
     if cmd.startswith("list"):
@@ -350,16 +493,16 @@ def event_handler(con, cmd):
     elif cmd.startswith("badd"):
         box_transaction(con, cmd)
 
-    elif cmd in ("bi", "binv"):
-        show_inventory(con, "box")
+    elif cmd.startswith("bi"):
+        show_inventory(con, "box", cmd)
 
-    elif cmd in ("wi", "winv"):
-        show_inventory(con, "warehouse")
+    elif cmd.startswith("wi"):
+        show_inventory(con, "warehouse", cmd)
 
-    elif cmd in ("bt", "bshow", "btrans"):
+    elif cmd.startswith("bt"): #, "bshow", "btrans"):
         show_transactions(con, "box", cmd)
 
-    elif cmd in ("wt", "wshow", "wtrans"):
+    elif cmd.startswith("wt"): #, "wshow", "wtrans"):
         show_transactions(con, "warehouse", cmd)
 
     elif cmd.startswith("sql"):
@@ -376,14 +519,31 @@ def event_handler(con, cmd):
 
     elif cmd in ("wr", "warehouse restock"):
         show_restock(con, "warehouse")
-    else:
-        print("invalid command")
+
+    elif cmd in ("restock nosticker", "restock nonsticker"):
+        restock_no_sticker(con)
+
+    elif cmd == "restock sticker":
+        restock_by_sticker(con)
+
+    elif cmd.startswith("total"):
+        totals(con)
+
 
 def main():
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-d", help="database name, default is minipantry.db", default="minipantry.db")
+
+    args = parser.parse_args()
+
     print("IT'S INVENTORY TIME!")
 
-    con = sqlite3.connect(r"minipantry.db")
+    db = "minipantry.db"
+    if args.d.lower() != db:
+        print(f"**** Database is {args.d} *****")
+
+    con = sqlite3.connect(args.d)
 
     while True:
 
@@ -395,8 +555,6 @@ def main():
             break
 
         event_handler(con, cmd)
-
-
 
 
 if __name__ == "__main__":
