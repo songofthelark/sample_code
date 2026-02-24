@@ -353,7 +353,7 @@ def totals(con):
 
     sql = ("select i.item_id, item_name, sum(quantity_changed) qsum "
            "from box_transactions b join items i on b.item_id = i.item_id"
-           " where quantity_changed < 0 group by 1,2 having qsum < 0")
+           " where quantity_changed < 0 group by 1,2 having qsum < 0 order by qsum desc")
 
     res = con.cursor().execute(sql)
 
@@ -404,7 +404,8 @@ def restock_by_sticker(con):
     # now we have the list of stickers we found in the box
     # lets review that these are the items we found
     sql = (f"select i.item_id, item_name, sticker from box_inventory b join "
-           f" items i on b.item_id=i.item_id where sticker <> 0 order by sticker, item_name")
+           f" items i on b.item_id=i.item_id where sticker <> 0 "
+           f"and quantity > 0 order by sticker, item_name")
 
     found_stickers =  []
     removed_stickers = []
