@@ -193,6 +193,11 @@ def box_transaction(con, cmd):
     if warehouse_quantity == 0:
         error("Add this item to the warehouse first")
         return
+
+    #TODO this needs to take into account NEW quantity
+    # so if you add an item to the box and it brings the total items to more
+    # than in the warehouse
+    # NOT just that you're adding one at a time
     if warehouse_quantity < quantity_changed:
         error(f"Sorry you only have {warehouse_quantity} of item {item_id} in the warehouse.")
         return
@@ -217,12 +222,12 @@ def box_transaction(con, cmd):
         return
 
     if sticker > 0 and quantity_changed > 0:
-        res = con.cursor().execute(f"select i.item_id, i.item_name from box_inventory b"
+        res = con.cursor().execute(f"select i.item_id, i.item_name from box_transactions b"
                                    f" join items i on b.item_id = i.item_id where sticker={sticker}")
         row = res.fetchone()
         if row:
             item_id, item_name = row
-            print(f"There is already an item in the box with sticker {sticker}: {item_name} (id {item_id})")
+            print(f"There is or was already an item in the box with sticker {sticker}: {item_name} (id {item_id})")
             return
 
     success = recalculate_inventory(con, table_type="box",  item_id=item_id, quantity_changed=quantity_changed, sticker=sticker)
@@ -276,9 +281,9 @@ def show_inventory(con: Connection, table_type, cmd=""):
         if not item_exists(con, item_to_search_for):
             return
 
-    print("---------------------------------")
-    print(f"{table_type.upper()} INVENTORY")
-    print("---------------------------------")
+    out = ["---------------------------------",
+           f"{table_type.upper()} INVENTORY",
+           "---------------------------------"]
 
     if table_type == "box" and  list_by_stickers:
         sql = f"select i.item_id, item_name, sticker, sum(quantity) from {table_type}_inventory w "
@@ -297,7 +302,7 @@ def show_inventory(con: Connection, table_type, cmd=""):
     rows = res.fetchall()
 
     if not rows:
-        print(f"No items in {table_type}_inventory")
+        out.append(f"No items in {table_type}_inventory")
         return
 
     for row in rows :
@@ -306,8 +311,11 @@ def show_inventory(con: Connection, table_type, cmd=""):
         if sticker:
             line += f", sticker: {sticker}"
 
-        print(line)
+        out.append(line)
 
+    print("\n".join(out))
+
+    return "\n".join(out)
 
 
 
@@ -372,6 +380,9 @@ def dump_to_text(con):
     date_str = datetime.now().strftime("%Y-%m-%d %H.%M.%S")
     with open(f"dump_{date_str}.txt", 'w') as f:
 
+        f.write(show_inventory(con, "box") + "\n\n")
+        f.write(show_inventory(con, "warehouse") + "\n\n")
+
         tables = ("items", "box_inventory", "warehouse_inventory", "box_transactions", "warehouse_transactions")
         for table in tables:
             f.write("-------------------------------------------------------\n")
@@ -386,32 +397,44 @@ def dump_to_text(con):
 
 def restock_by_sticker(con):
 
-    stickers = set()
-    while True:
-        sticker = input("Sticker: ").strip()
-        if re.search("[^0-9]", sticker):
-            print("Numbers only")
-            continue
 
-        if not sticker:
-            break
-
-        stickers.add(int(sticker))
-
-    if not stickers:
-        return
-
-    # now we have the list of stickers we found in the box
-    # lets review that these are the items we found
     sql = (f"select i.item_id, item_name, sticker from box_inventory b join "
            f" items i on b.item_id=i.item_id where sticker <> 0 "
            f"and quantity > 0 order by sticker, item_name")
 
+    res = con.cursor().execute(sql)
+    all_box_items = []
+    current_stickers = set()
+    for row in res.fetchall():
+        all_box_items.append(row)
+        current_stickers.add(row[2])
+
+    stickers = set()
+    while True:
+        stk = input("Sticker: ").strip()
+        if not stk:
+            break
+
+        if re.search("[^0-9]", stk):
+            print("Numbers only")
+            continue
+
+        if int(stk) not in current_stickers:
+            print(f"Sticker {stk} isn't there")
+            continue
+
+
+
+        stickers.add(int(stk))
+
+    if not stickers:
+        return
+
+
     found_stickers =  []
     removed_stickers = []
 
-    res = con.cursor().execute(sql)
-    for row in res.fetchall():
+    for row in all_box_items:
         item_id, item_name, box_sticker = row
         if box_sticker in stickers:
             stickers.remove(box_sticker)
@@ -419,26 +442,20 @@ def restock_by_sticker(con):
         else:
             removed_stickers.append((item_id, item_name, box_sticker))
 
-    if stickers:
-        st = ', '.join([str(x) for x in stickers])
-        print(f"These stickers aren't there! {st}")
-        return
 
     print("So these items are in the box: ")
     for item_id, name, sticker in found_stickers:
         print(f"id {item_id} {name}, sticker: {sticker}")
 
-    print("\nAnd these items were removed from the box: ")
+    print("\nConfirm each item to remove:")
     for item_id, name, sticker in removed_stickers:
-        print(f"id {item_id} {name}, sticker: {sticker}")
 
-    confirm = input("type YES to confirm: ")
-    if confirm != "YES":
-        print("ok, nevermind")
-        return
-
-    for item_id, _, sticker in removed_stickers:
-        box_transaction(con, f"badd i{item_id} s{sticker} q-1")
+        confirm = input(f"Remove id {item_id} {name}, sticker: {sticker}? [Yn]")
+        if confirm == "Y":
+            print("Removed")
+            box_transaction(con, f"badd i{item_id} s{sticker} q-1")
+        else:
+            print("Kept")
 
     print("done")
 
