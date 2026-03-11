@@ -98,29 +98,38 @@ def recalculate_inventory(con:Connection, table_type, item_id:int, quantity_chan
     return True
 
 
-def get_item_quantity(con, table_type, item_id):
+def show_max_sticker(con):
+    s =  "select max(sticker) from box_inventory"
+    res = con.cursor().execute(s)
+    row = res.fetchone()
+    if row:
+        print("Last sticker was", row[0])
+    else:
+        print("No stickers")
+
+def get_item_name_quantity(con, table_type, item_id):
     s = (f"select i.item_id, item_name, sum(quantity) from {table_type}_inventory x "
          f"join items i on i.item_id = x.item_id where i.item_id={item_id} group by i.item_id, item_name")
 
     res = con.cursor().execute(s)
     row = res.fetchone()
     if row:
-        return row[0], row[1], row[2]
-    return  0, "(none)", 0
+        return row[1], row[2]
+    return  "(none)", 0
 
 
 def warehouse_transaction(con:Connection, cmd):
 
     item_id, quantity_changed, sticker = check_cmd_line(cmd)
-    if item_id <= 0:
+    if item_id <= 0 or quantity_changed == 0:
         error("Bad command, should be wadd i# q#")
         return
 
     if not item_exists(con, item_id):
         return
 
-    _, name, box_quantity = get_item_quantity(con, "box", item_id)
-    _, _, warehouse_quantity = get_item_quantity(con, "warehouse", item_id)
+    name, box_quantity = get_item_name_quantity(con, "box", item_id)
+    _, warehouse_quantity = get_item_name_quantity(con, "warehouse", item_id)
 
     if quantity_changed < 0 and abs(quantity_changed) > warehouse_quantity:
         error(f"Sorry you only have {warehouse_quantity} of item {item_id} in the warehouse.")
@@ -139,7 +148,7 @@ def warehouse_transaction(con:Connection, cmd):
     con.cursor().execute(sql)
     con.commit()
 
-    item_id, item_name, quantity = get_item_quantity(con,"warehouse", item_id)
+    item_name, quantity = get_item_name_quantity(con, "warehouse", item_id)
     print(f"Warehouse now has {quantity} {item_name} id {item_id}")
 
 def check_cmd_line(cmd):
@@ -164,16 +173,23 @@ def check_cmd_line(cmd):
     if len(matches) == 1:
         item_id = int(matches[0][1:])
 
-    matches = re.findall(r"\bq-?\d+\b", cmd, flags=re.IGNORECASE)
-    if len(matches) == 1:
-        quantity = int(matches[0][1:])
-
-    elif quantity ==  0:
-        error("Zero quantity?")
-
     matches = re.findall(r"\bs\d+\b", cmd, flags=re.IGNORECASE)
     if len(matches) == 1:
         sticker = int(matches[0][1:])
+        if cmd.startswith("badd"):
+            quantity = 1
+        elif cmd.startswith("brem"):
+            quantity = -1
+    else:
+        # if there isn't a sticker, we need to have quantity
+        matches = re.findall(r"\bq-?\d+\b", cmd, flags=re.IGNORECASE)
+        if len(matches) == 1:
+            quantity = int(matches[0][1:])
+
+    if quantity ==  0:
+        error("Zero quantity?")
+
+
 
     return item_id, quantity, sticker
 
@@ -181,28 +197,29 @@ def check_cmd_line(cmd):
 def box_transaction(con, cmd):
 
     item_id, quantity_changed, sticker = check_cmd_line(cmd)
-    if item_id <= 0:
+    if item_id <= 0 or quantity_changed == 0:
         error("Bad command, should be badd i# q# [s#]")
         return
 
     if not item_exists(con, item_id):
         return
 
-    _, _, warehouse_quantity = get_item_quantity(con, "warehouse", item_id)
+    _, warehouse_quantity = get_item_name_quantity(con, "warehouse", item_id)
+    _, box_quantity = get_item_name_quantity(con, "box", item_id)
 
     if warehouse_quantity == 0:
         error("Add this item to the warehouse first")
         return
 
-    #TODO this needs to take into account NEW quantity
-    # so if you add an item to the box and it brings the total items to more
+    # CHECK THIS, this needs to take into account NEW quantity
+    # so if you add an item to the box, and it brings the total items to more
     # than in the warehouse
     # NOT just that you're adding one at a time
-    if warehouse_quantity < quantity_changed:
+    if warehouse_quantity < (quantity_changed + box_quantity):
         error(f"Sorry you only have {warehouse_quantity} of item {item_id} in the warehouse.")
         return
 
-    _, _, box_quantity = get_item_quantity(con, "box", item_id)
+
     if quantity_changed < 0 and abs(quantity_changed) > box_quantity:
         error(f"Sorry you only have {box_quantity} of item {item_id} in the box.")
         return
@@ -244,7 +261,7 @@ def box_transaction(con, cmd):
     con.commit()
 
     for table_type in ("warehouse", "box"):
-        item_id, item_name, quantity = get_item_quantity(con, table_type, item_id)
+        item_name, quantity = get_item_name_quantity(con, table_type, item_id)
         print(f"{table_type.title()} now has {quantity} {item_name} id {item_id}")
 
 
@@ -279,7 +296,7 @@ def show_inventory(con: Connection, table_type, cmd=""):
     if len(ar) == 2 and not re.search("[^0-9]", ar[1]):
         item_to_search_for = ar[1]
         if not item_exists(con, item_to_search_for):
-            return
+            return None
 
     out = ["---------------------------------",
            f"{table_type.upper()} INVENTORY",
@@ -302,8 +319,10 @@ def show_inventory(con: Connection, table_type, cmd=""):
     rows = res.fetchall()
 
     if not rows:
-        out.append(f"No items in {table_type}_inventory")
-        return
+        if item_to_search_for:
+            out.append(f"Item {item_to_search_for} is not in {table_type}_inventory")
+        else:
+            out.append(f"No items in {table_type}_inventory")
 
     for row in rows :
         item_id, name, sticker, quantity  = row
@@ -379,6 +398,8 @@ def dump_to_text(con):
 
     date_str = datetime.now().strftime("%Y-%m-%d %H.%M.%S")
     with open(f"dump_{date_str}.txt", 'w') as f:
+
+        f.write(show_inventory(con, "box", "bi sticker") + "\n\n")
 
         f.write(show_inventory(con, "box") + "\n\n")
         f.write(show_inventory(con, "warehouse") + "\n\n")
@@ -502,6 +523,9 @@ def restock_no_sticker(con):
 
 def event_handler(con, cmd):
 
+    if cmd.startswith("last"): # last sticker:
+        show_max_sticker(con)
+
     if cmd.startswith("list"):
         list_items(con, cmd)
 
@@ -509,6 +533,9 @@ def event_handler(con, cmd):
         warehouse_transaction(con, cmd)
 
     elif cmd.startswith("badd"):
+        box_transaction(con, cmd)
+
+    elif cmd.startswith("brem"):  #boxremove
         box_transaction(con, cmd)
 
     elif cmd.startswith("bi"):
