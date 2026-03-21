@@ -58,7 +58,9 @@ def list_items(con: Connection, cmd):
 
     sql = "select * from items"
     if len(ar) > 1:
-        sql += f" where item_name like '{ar[1]}%'"
+        sql += f" where item_name like '{ar[1]}% and hide=0'"
+    else:
+        sql += " where hide=0 "
 
     sql += " order by item_name"
 
@@ -238,7 +240,19 @@ def box_transaction(con, cmd):
         error("A sticker item can only add or remove one unit")
         return
 
-    if sticker > 0 and quantity_changed > 0:
+    add_item = False
+    if re.match(".add", cmd, flags=re.IGNORECASE):
+        add_item = True
+
+    # don't really need these next two checks I think
+    if not add_item and quantity_changed > 0:
+        print("Use negative quantity for removing items")
+        return
+
+    if add_item and quantity_changed < 0:
+        print("Quantity must be positive for adding an item.")
+
+    if add_item and sticker > 0 and quantity_changed > 0:
         res = con.cursor().execute(f"select i.item_id, i.item_name from box_transactions b"
                                    f" join items i on b.item_id = i.item_id where sticker={sticker}")
         row = res.fetchone()
@@ -271,7 +285,7 @@ def show_restock(con: Connection, table_type):
     print("---------------------------------")
 
     sql = (f"select i.item_id, item_name, sum(quantity) as qsum from {table_type}_inventory w "
-           f"join items i  on w.item_id = i.item_id group by 1,2 having qsum = 0")
+           f"join items i  on w.item_id = i.item_id where hide=0 group by 1,2 having qsum = 0")
 
     res = con.cursor().execute(sql)
     rows = res.fetchall()
@@ -473,12 +487,32 @@ def restock_by_sticker(con):
 
         confirm = input(f"Remove id {item_id} {name}, sticker: {sticker}? [Yn]")
         if confirm == "Y":
-            print("Removed")
-            box_transaction(con, f"badd i{item_id} s{sticker} q-1")
+            box_transaction(con, f"brem i{item_id} s{sticker} q-1")
+            print(f"Removed {name}")
+
         else:
             print("Kept")
 
     print("done")
+
+
+def hide(con, cmd):
+    ar = cmd.split(" ")
+    if len(ar) != 2:
+        print("Need an item id")
+        return
+
+    text, item_id = ar
+    if not item_exists(con, item_id):
+        return
+
+    hide_item = 1
+    if text == "unhide":
+        hide_item = 0
+
+    sql = f"update items set hide={hide_item} where item_id={item_id};"
+    con.cursor().execute(sql)
+    print("Done")
 
 
 def restock_no_sticker(con):
@@ -518,7 +552,7 @@ def restock_no_sticker(con):
         return
 
     for item_id, items_removed in removed:
-        event_handler(con, f"badd i{item_id} q-{items_removed} s0")
+        event_handler(con, f"brem i{item_id} q-{items_removed} s0")
 
 
 def event_handler(con, cmd):
@@ -528,6 +562,9 @@ def event_handler(con, cmd):
 
     if cmd.startswith("list"):
         list_items(con, cmd)
+
+    elif "hide" in cmd:  #this could be either "hide" or "unhide"
+        hide(con, cmd)
 
     elif cmd.startswith("wadd"):
         warehouse_transaction(con, cmd)
