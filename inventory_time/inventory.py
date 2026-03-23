@@ -57,8 +57,14 @@ def list_items(con: Connection, cmd):
     ar = cmd.split(" ")
 
     sql = "select * from items"
-    if len(ar) > 1:
-        sql += f" where item_name like '{ar[1]}% and hide=0'"
+
+    #list hidden means
+    if len(ar) > 1 :
+        if ar[1] == "hidden":
+            sql += " where hide=1 "
+        else:
+            sql += f" where item_name like '{ar[1]}%' and hide=0"
+
     else:
         sql += " where hide=0 "
 
@@ -563,7 +569,7 @@ def event_handler(con, cmd):
     if cmd.startswith("list"):
         list_items(con, cmd)
 
-    elif "hide" in cmd:  #this could be either "hide" or "unhide"
+    elif cmd.startswith("hide") or cmd.startswith("unhide"):
         hide(con, cmd)
 
     elif cmd.startswith("wadd"):
