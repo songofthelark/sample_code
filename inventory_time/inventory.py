@@ -107,11 +107,18 @@ def recalculate_inventory(con:Connection, table_type, item_id:int, quantity_chan
 
 
 def show_max_sticker(con):
-    s =  "select max(sticker) from box_inventory"
-    res = con.cursor().execute(s)
-    row = res.fetchone()
-    if row:
-        print("Last sticker was", row[0])
+
+    max_sticker = 0
+    tables = ['box_inventory', 'expiration_dates']
+    for table in tables:
+        s =  f"select max(sticker) from {table}"
+        res = con.cursor().execute(s)
+        row = res.fetchone()
+        if row and row[0] and int(row[0]) > max_sticker:
+            max_sticker = int(row[0])
+
+    if max_sticker:
+        print(f"Last sticker was {max_sticker}" )
     else:
         print("No stickers")
 
@@ -124,6 +131,9 @@ def get_item_name_quantity(con, table_type, item_id):
     if row:
         return row[1], row[2]
     return  "(none)", 0
+
+def add_exp_date(con, cmd):
+    pass
 
 
 def warehouse_transaction(con:Connection, cmd):
@@ -285,19 +295,52 @@ def box_transaction(con, cmd):
         print(f"{table_type.title()} now has {quantity} {item_name} id {item_id}")
 
 
-def show_restock(con: Connection, table_type):
+def show_box_restock(con:Connection):
+
     print("---------------------------------")
-    print(f"{table_type.upper()} OUT OF STOCK")
+    print("BOX OUT OF STOCK")
     print("---------------------------------")
 
-    sql = (f"select i.item_id, item_name, sum(quantity) as qsum from {table_type}_inventory w "
+    warehouse = {}
+
+    sql = (f"select i.item_id, sum(quantity) as qsum from warehouse_inventory w "
+           f"join items i  on w.item_id = i.item_id where hide=0 group by 1")
+
+    res = con.cursor().execute(sql)
+    rows = res.fetchall()
+    for row in rows:
+        item_id, quantity = row
+        warehouse[item_id] = int(quantity)
+
+    sql = (f"select i.item_id, item_name, sum(quantity) as qsum from box_inventory w "
+            f"join items i  on w.item_id = i.item_id where hide=0 group by 1,2 having qsum = 0")
+
+    res = con.cursor().execute(sql)
+    rows = res.fetchall()
+    for row in rows:
+        item_id, name, quantity = row
+        item_id = int(item_id)
+        line = f"id {item_id} {name}"
+        if item_id not in warehouse or warehouse[item_id] == 0:
+            line += "\t** BUY **  "
+        else:
+            line += f"\twarehouse has: {warehouse[item_id]}"
+
+        print(line)
+
+def show_warehouse_restock(con: Connection):
+    print("---------------------------------")
+    print("WAREHOUSE OUT OF STOCK")
+    print("---------------------------------")
+
+    sql = (f"select i.item_id, item_name, sum(quantity) as qsum from warehouse_inventory w "
            f"join items i  on w.item_id = i.item_id where hide=0 group by 1,2 having qsum = 0")
 
     res = con.cursor().execute(sql)
     rows = res.fetchall()
 
     if not rows:
-        print(f"No items to restock in {table_type}_inventory")
+        print(f"No items to restock in warehouse_inventory")
         return
 
     for row in rows:
@@ -396,11 +439,15 @@ def execute_sql(con,cmd):
     print("done")
 
 
-def totals(con):
+def totals(con, summarized=True, diapers_only=False):
 
     sql = ("select i.item_id, item_name, sum(quantity_changed) qsum "
            "from box_transactions b join items i on b.item_id = i.item_id"
-           " where quantity_changed < 0 group by 1,2 having qsum < 0 order by qsum desc")
+           " where quantity_changed < 0 " )
+    if diapers_only:
+            sql += " and item_name like 'diaper%' "
+
+    sql += "group by 1,2 having qsum < 0 order by qsum desc"
 
     res = con.cursor().execute(sql)
 
@@ -408,10 +455,43 @@ def totals(con):
         print("No items were distributed")
         return
 
-    print("We distributed:")
+    # TODO put in some table
+    items = {"diapers": {6, 7, 8, 9, 10, 11, 5},
+             "formula": {2, 3, 4, 29},
+             "toothpaste": {14, 31},
+             "toothbrushes": {17, 18},
+             "moisturizer": {35, 21},
+             "soap": {20,32},
+             "pads": {1,37},
+             "baby wash/lotion": {25,36,24},
+             "shampoo": {34,28},
+             "conditioner": {30,33},
+             "hairbrushes": {12,13}}
+
+
+
+    categories = {}
+    for item in items:
+        categories[item] = 0
+
+    print("We distributed:\n")
+
     for row in res.fetchall():
-        _, item_name, quantity = row
-        print(f"{abs(quantity)} {item_name}")
+        item_id, item_name, quantity = row
+        found = False
+        if summarized:
+            for product_category, ids in items.items():
+                if item_id in ids:
+                    categories[product_category] += quantity
+                    found = True
+        if not found:
+            categories[item_name] = quantity
+
+    sorted_dict = dict(sorted(categories.items(), key=lambda x: x[1]))
+    for item_name, quantity in sorted_dict.items():
+        if quantity != 0:
+            print(f"{abs(quantity)} {item_name}")
+
 
 
 def dump_to_text(con):
@@ -424,7 +504,8 @@ def dump_to_text(con):
         f.write(show_inventory(con, "box") + "\n\n")
         f.write(show_inventory(con, "warehouse") + "\n\n")
 
-        tables = ("items", "box_inventory", "warehouse_inventory", "box_transactions", "warehouse_transactions")
+        tables = ("items", "box_inventory", "warehouse_inventory", "box_transactions",
+                  "warehouse_transactions, expiration_dates")
         for table in tables:
             f.write("-------------------------------------------------------\n")
             f.write(f"              {table.upper()}\n")
@@ -603,10 +684,10 @@ def event_handler(con, cmd):
         dump_to_text(con)
 
     elif cmd in ("br", "box restock"):
-        show_restock(con, "box")
+        show_box_restock(con)
 
     elif cmd in ("wr", "warehouse restock"):
-        show_restock(con, "warehouse")
+        show_warehouse_restock(con)
 
     elif cmd in ("restock nosticker", "restock nonsticker"):
         restock_no_sticker(con)
@@ -614,9 +695,14 @@ def event_handler(con, cmd):
     elif cmd == "restock sticker":
         restock_by_sticker(con)
 
-    elif cmd.startswith("total"):
+    elif cmd.startswith("summary"):
         totals(con)
 
+    elif cmd.startswith("total"):
+        totals(con, summarized=False)
+
+    elif cmd.startswith("diapers"):
+        totals(con, summarized=False, diapers_only=True)
 
 def main():
 
