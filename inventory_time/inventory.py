@@ -194,6 +194,10 @@ def check_cmd_line(cmd):
     matches = re.findall(r"\bs\d+\b", cmd, flags=re.IGNORECASE)
     if len(matches) == 1:
         sticker = int(matches[0][1:])
+        if sticker <= 0:
+            error(f"Invalid stucker number {sticker}")
+            return item_id, quantity, sticker
+
         if cmd.startswith("badd"):
             quantity = 1
         elif cmd.startswith("brem"):
@@ -267,6 +271,7 @@ def box_transaction(con, cmd):
 
     if add_item and quantity_changed < 0:
         print("Quantity must be positive for adding an item.")
+        return
 
     if add_item and sticker > 0 and quantity_changed > 0:
         res = con.cursor().execute(f"select i.item_id, i.item_name from box_transactions b"
@@ -639,7 +644,7 @@ def restock_no_sticker(con):
         return
 
     for item_id, items_removed in removed:
-        event_handler(con, f"brem i{item_id} q-{items_removed} s0")
+        event_handler(con, f"brem i{item_id} q-{items_removed}")
 
 
 def event_handler(con, cmd):
@@ -703,6 +708,14 @@ def event_handler(con, cmd):
 
     elif cmd.startswith("diapers"):
         totals(con, summarized=False, diapers_only=True)
+
+def put_back(con, cmd):
+    # parse out the sticker
+    # check if it existed and if it isn't there now
+    # update box inventory and set quantity back to 1 for that sticker
+    # update warehouse inventory and add 1 back to quantity
+    # delete box transaction row and warehouse transaction row where you removed that item
+    pass
 
 def main():
 
