@@ -630,6 +630,9 @@ def event_handler(con, cmd):
     if cmd.startswith("last"):  # last sticker:
         show_max_sticker(con)
 
+    if cmd.startswith("whatis"):
+        get_item_by_id(con, cmd)
+
     if cmd.startswith("list"):
         list_items(con, cmd)
 
@@ -721,6 +724,31 @@ def put_back(con, cmd):
     con.cursor().execute(f"delete from box_transactions where quantity_changed=-1 and sticker={sticker}")
 
     print("done")
+
+
+def get_item_by_id(con, cmd):
+
+    item_id, _,  sticker = check_cmd_line(cmd)
+    if not sticker and not item_id:
+        error("Must specify item or sticker")
+        return
+
+    # check if it existed and if it isn't there now
+    sql = (f"select b.item_id, item_name from box_inventory b join "
+           f"items i on i.item_id=b.item_id where ")
+
+    if sticker:
+        sql += f"sticker={sticker}"
+    else:
+        sql += f"b.item_id={item_id}"
+
+    res = con.cursor().execute(sql)
+    row = res.fetchone()
+    if row is None:
+        error(f"Not found")
+        return
+
+    print(f"Item {row[0]}: {row[1]}")
 
 
 def main():
