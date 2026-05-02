@@ -1,3 +1,4 @@
+import os.path
 import sqlite3
 import re
 from sqlite3 import Connection
@@ -508,7 +509,7 @@ def dump_to_text(con):
                 f.write(f"{'\t'.join([str(v) for v in row])}\n")
 
 
-def restock_by_sticker(con):
+def restock_by_sticker(con, stickers=None):
     sql = (f"select i.item_id, item_name, sticker from box_inventory b join "
            f" items i on b.item_id=i.item_id where sticker <> 0 "
            f"and quantity > 0 order by sticker, item_name")
@@ -520,22 +521,29 @@ def restock_by_sticker(con):
         all_box_items.append(row)
         current_stickers.add(row[2])
 
-    stickers = set()
-    while True:
-        stk = input("Sticker: ").strip()
-        if not stk:
-            break
+    if not stickers:
+        stickers = set()
 
-        if re.search("[^0-9]", stk):
-            print("Numbers only")
-            continue
+        while True:
+            stk = input("Sticker: ").strip()
+            if not stk:
+                break
+
+            if re.search("[^0-9]", stk):
+                print("Numbers only")
+                continue
+
+            stickers.add(int(stk))
+
+    not_found_stickers = set()
+    for stk in stickers:
 
         if int(stk) not in current_stickers:
             print(f"Sticker {stk} isn't there")
+            not_found_stickers.add(stk)
             continue
 
-        stickers.add(int(stk))
-
+    stickers -= not_found_stickers
     if not stickers:
         return
 
@@ -557,7 +565,7 @@ def restock_by_sticker(con):
     print("\nConfirm each item to remove:")
     for item_id, name, sticker in removed_stickers:
 
-        confirm = input(f"Remove id {item_id} {name}, sticker: {sticker}? [Yn]")
+        confirm = input(f"\nRemove id {item_id} {name}, sticker: {sticker}? [Yn]")
         if confirm == "Y":
             box_transaction(con, f"brem i{item_id} s{sticker} q-1")
             print(f"Removed {name}")
@@ -626,7 +634,34 @@ def restock_no_sticker(con):
         event_handler(con, f"brem i{item_id} q-{items_removed}")
 
 
+def load_restock_file(con, cmd):
+
+    tokens = cmd.split(" ")
+
+    file = "restock_file.txt"
+    if len(tokens) > 2:
+        file = tokens[1].strip()
+
+    if not os.path.exists(file):
+        error(f"File {file} not found")
+        return
+
+    stickers = set()
+    with open(file) as f:
+        for n, line in enumerate(f.readlines()):
+            sticker = line.strip()
+
+            if re.search(r"\D", sticker):
+                print(f"Non-numeric value on line {n}: {line}")
+                continue
+
+            stickers.add(int(sticker))
+
+    restock_by_sticker(con, stickers)
+
+
 def event_handler(con, cmd):
+
     if cmd.startswith("last"):  # last sticker:
         show_max_sticker(con)
 
@@ -684,6 +719,9 @@ def event_handler(con, cmd):
     elif cmd == "restock sticker":
         restock_by_sticker(con)
 
+    elif cmd == "restock file":
+        load_restock_file(con, cmd)
+
     elif cmd.startswith("summary"):
         totals(con)
 
@@ -697,8 +735,8 @@ def event_handler(con, cmd):
 def put_back(con, cmd):
     # parse out the sticker
     item_id, quantity, sticker = check_cmd_line(cmd)
-    if not sticker:
-        error("Invalid sticker number")
+    if not sticker or item_id==-1:
+        error("Need a valid sticker and item: sNNN iNN")
         return
 
     # check if it existed and if it isn't there now
@@ -723,6 +761,8 @@ def put_back(con, cmd):
     # delete box transaction row where you removed that item
     con.cursor().execute(f"delete from box_transactions where quantity_changed=-1 and sticker={sticker}")
 
+    con.commit()
+
     print("done")
 
 
@@ -730,7 +770,7 @@ def get_item_by_id(con, cmd):
 
     item_id, _,  sticker = check_cmd_line(cmd)
     if not sticker and not item_id:
-        error("Must specify item or sticker")
+        error("Must specify item or sticker: sNNN or iNN")
         return
 
     # check if it existed and if it isn't there now
@@ -749,6 +789,13 @@ def get_item_by_id(con, cmd):
         return
 
     print(f"Item {row[0]}: {row[1]}")
+
+    if sticker:
+        res = con.cursor().execute(f"select quantity_changed, last_updated from box_transactions where sticker={sticker}")
+        rows = res.fetchall()
+        for row in rows:
+            quantity, updated = row
+            print(f"Quantity: {quantity} on {updated}")
 
 
 def main():
