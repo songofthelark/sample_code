@@ -651,6 +651,9 @@ def load_restock_file(con, cmd):
         for n, line in enumerate(f.readlines()):
             sticker = line.strip()
 
+            if not sticker:
+                continue
+
             if re.search(r"\D", sticker):
                 print(f"Non-numeric value on line {n}: {line}")
                 continue
