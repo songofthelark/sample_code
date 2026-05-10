@@ -8,6 +8,12 @@ def dump_to_text(con):
     date_str = datetime.now().strftime("%Y-%m-%d %H.%M.%S")
     with open(f"dump_{date_str}.txt", 'w') as f:
 
+        f.write(show_warehouse_restock(con) + "\n\n")
+        f.write(show_inventory(con, "warehouse", "wiq") + "\n\n")
+        f.write(show_box_restock(con) + "\n\n")
+        f.write(show_inventory(con, "box", "biq") + "\n\n")
+        f.write(show_inventory(con, "box", "bi sticker") + "\n\n")
+
         tables = ("items", "box_inventory",
                   "warehouse_inventory", "box_transactions",
                   "warehouse_transactions, expiration_dates")
@@ -20,13 +26,6 @@ def dump_to_text(con):
             rows = res.fetchall()
             for row in rows:
                 f.write(f"{'\t'.join([str(v) for v in row])}\n")
-
-        f.write(show_inventory(con, "box", "bi sticker") + "\n\n")
-
-        f.write(show_inventory(con, "box", "biq") + "\n\n")
-        f.write(show_box_restock(con) + "\n\n")
-        f.write(show_inventory(con, "warehouse", "wiq") + "\n\n")
-        f.write(show_warehouse_restock(con) + "\n\n")
 
 
 def totals(con, summarized=True, diapers_only=False):
@@ -118,7 +117,6 @@ def show_box_restock(con: Connection):
 
 
 def show_warehouse_restock(con: Connection):
-
     out = ["---------------------------------",
            "WAREHOUSE OUT OF STOCK",
            "---------------------------------"]
