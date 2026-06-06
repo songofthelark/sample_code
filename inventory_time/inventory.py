@@ -17,11 +17,12 @@ def item_needs_sticker(con, item_id):
 
 def confirm(con, item_id, sticker=None, quantity=None):
     res = con.cursor().execute(f"select item_name from items where item_id = {item_id}")
-    item_name = res.fetchone()[0]
-
-    if not item_name:
+    row = res.fetchone()
+    if not row:
         error(f"No item id {item_id}")
         return False
+
+    item_name = row[0]
 
     message = f"Item is {item_name}"
     if sticker:
@@ -120,7 +121,7 @@ def warehouse_action(con: Connection, item_id, quantity_changed):
     print(f"Warehouse now has {quantity} {item_name} id {item_id}")
 
 
-def box_input(con: Connection, cmd: str = None):
+def box_input(con: Connection, cmd: str = None, do_confirm=True):
     # if there are space-separated arguments
 
     if re.search(r"\s", cmd):
@@ -134,7 +135,7 @@ def box_input(con: Connection, cmd: str = None):
         if re.match(".add", cmd, flags=re.IGNORECASE):
             add_item = True
 
-        if confirm(con, item_id, sticker):
+        if not do_confirm or confirm(con, item_id, sticker):
             box_action(con, item_id, quantity_changed, sticker=sticker, add_item=add_item)
 
     else:
@@ -146,10 +147,13 @@ def box_input(con: Connection, cmd: str = None):
                 break
 
             sticker = input("Scan ID sticker barcode: ")
-            id_pairs.append((item_id, sticker))
+            try:
+                id_pairs.append((int(item_id), int(sticker)))
+            except ValueError as e:
+                error(f"Not a number: {e}")
 
         for item_id, sticker in id_pairs:
-            if confirm(con, item_id, sticker=sticker):
+            if not do_confirm or confirm(con, item_id, sticker=sticker):
                 box_action(con, item_id, 1, sticker, True)
 
 
@@ -280,12 +284,13 @@ def inventory_by_sticker(con, stickers=None):
     for item_id, name, sticker in found_stickers:
         print(f"id {item_id} {name}, sticker: {sticker}")
 
+    # TODO why do we have two confirmations here?
     print("\nConfirm each item to remove:")
     for item_id, name, sticker in removed_stickers:
 
         ok = input(f"\nRemove id {item_id} {name}, sticker: {sticker}? [Yn]")
         if ok == "Y":
-            box_input(con, f"brem i{item_id} s{sticker} q-1")
+            box_input(con, f"brem i{item_id} s{sticker} q-1", do_confirm=False)
             print(f"Removed {name}")
 
         else:
