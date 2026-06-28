@@ -10,86 +10,91 @@ class BaseEnum(Enum):
 
 
 class Color(BaseEnum):
-    R = "R",
-    RO = "RO",
-    OR = "OR",
-    ORANGE = "O",
-    Y = "Y",
-    YG = "YG",
-    GY = "GY",
-    G = "G",
-    BG = "BG",
-    GB = "GB",
-    B = "B",
-    V = "V",
-    P = "P",
-    RP = "RP",
-    PR = "PR",
-    C = "C",
-    W = "W",
-    GR = "GR",
-    BL = "BL",
-    PI = "PI",
+    R = "R"
+    RO = "RO"
+    OR = "OR"
+    ORANGE = "O"
+    Y = "Y"
+    YG = "YG"
+    GY = "GY"
+    G = "G"
+    BG = "BG"
+    GB = "GB"
+    B = "B"
+    V = "V"
+    P = "P"
+    RP = "RP"
+    PR = "PR"
+    C = "C"
+    W = "W"
+    GR = "GR"
+    BL = "BL"
+    PI = "PI"
     BR = "BR"
 
 
 class Transparency(BaseEnum):
-    TP = "TP",
-    STP = "STP",
-    TL = "TL",
-    STL = "STL",
+    TP = "TP"
+    STP = "STP"
+    TL = "TL"
+    STL = "STL"
     OPAQUE = "O"
 
 
 class Phenomenon(BaseEnum):
-    A = "A",
-    AD = "Ad",
-    AV = "Av",
-    C = "C",
-    CC = "CC",
-    IRID = "I",
-    L = "L",
-    ORIENT = "O",
+    A = "A"
+    AD = "Ad"
+    AV = "Av"
+    C = "C"
+    CC = "CC"
+    IRID = "I"
+    L = "L"
+    ORIENT = "O"
     P = "P"
 
 
 class OpticNature(BaseEnum):
-    SR = "SR",
-    SRADR = "SR-ADR",
-    DR = "DR",
+    SR = "SR"
+    SRADR = "SR-ADR"
+    DR = "DR"
     AGG = "AGG"
 
 
 class Assembled(BaseEnum):
-    Y = "Y",
+    Y = "Y"
     N = "N"
 
 
 class StoneGroup:
 
     # default value is all transparencies, all colors, no phenomena, not assembled
-    def __init__(self, name: str,  transparency: list[Transparency] = tuple(Transparency),
+    def __init__(self, name: str, transparency: list[Transparency] = tuple(Transparency),
                  phenomenon: list[Phenomenon] = tuple(),
                  assembled: Assembled = Assembled.N,
                  primary_colors: list[Color] = tuple(Color)):
-
         self.name = name
         self.transparency = transparency
         self.phenomena = phenomenon
         self.assembled = assembled
         self.primary_colors = primary_colors
 
-    def has_primary_color(self, color:Color):
+    def has_primary_color(self, color: Color):
         return color in self.primary_colors
 
-    def has_phenomenon(self, phenomenon:Phenomenon):
+    def has_phenomenon(self, phenomenon: Phenomenon):
         return phenomenon in self.phenomena
 
-    def is_assembled(self)
-        return Assembled.Y in self.assembled
+    def is_phenomenal(self):
+        return len(self.phenomena)
 
-    def has_transparency(self, transparency:Transparency):
+    def is_assembled(self):
+        return Assembled.Y == self.assembled
+
+    def has_transparency(self, transparency: Transparency):
         return transparency in self.transparency
+
+    def __str__(self):
+        return self.name
 
 
 stone_groups = [
@@ -138,4 +143,3 @@ stone_groups = [
     StoneGroup("black", primary_colors=[Color.BL]),
 
 ]
-
